@@ -46,20 +46,20 @@ userTimelines :: TVar UserTimeline
 userTimelines = unsafePerformIO $ newTVarIO M.empty
 
 
-getStatus :: UnixTime -> UserID -> STM Status
+getStatus :: UnixTime -> UserID -> STM (Status, UnixTime)
 getStatus t u = do
     timelines <- readTVar userTimelines
     case M.lookup u timelines of
-        Nothing -> return Offline
+        Nothing -> return (Offline, 0)
         Just timeline -> readTVar timeline >>= return.interp
     where
       interp Timeline{..}
-          | lastActivity >= t - disconnect = Online
-          | lastHeartbeat < t - disconnect = Offline
-          | lastActivity >= t - away = Online
-          | otherwise = Away
+          | lastActivity >= t - disconnect = (Online, lastActivity)
+          | lastHeartbeat < t - disconnect = (Offline, lastActivity)
+          | lastActivity >= t - away = (Online, lastActivity)
+          | otherwise = (Away, lastActivity)
 
-getStatusIO :: UnixTime -> UserID -> IO Status
+getStatusIO :: UnixTime -> UserID -> IO (Status, UnixTime)
 getStatusIO t u = atomically $ getStatus t u
 
 eventIO :: UserID -> Timeline -> IO ()

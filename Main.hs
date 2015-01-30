@@ -51,8 +51,8 @@ main = do
         get "/status/:user" $ do
             t <- getTime
             u <- getUser
-            status <- liftIO $ getStatusIO t u
-            json $ (u, showStatus status)
+            (status, active) <- liftIO $ getStatusIO t u
+            json $ (u, showStatus status, active)
     where
         getTime = rescue (do
             t <- param "time"

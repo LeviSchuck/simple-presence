@@ -55,7 +55,7 @@ main = do
             json $ (u, showStatus status, active)
         post "/status" $ do
             t <- getTime
-            us <- param "users"
+            us <- jsonData
             let users = filter filterUser us
             results <- liftIO $ forM users $ \user -> do
                 (status, active) <- getStatusIO t user

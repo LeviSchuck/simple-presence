@@ -9,8 +9,8 @@ import Control.Monad.IO.Class(liftIO)
 
 import Presence.Timeline
 import Presence.Status
-import Data.Traversable as T
-import Data.Text as T
+import qualified Data.Traversable as T
+import qualified Data.Text as T
 import Data.UnixTime as U
 import Foreign.C.Types
 import System.IO.Unsafe
@@ -53,13 +53,22 @@ main = do
             u <- getUser
             (status, active) <- liftIO $ getStatusIO t u
             json $ (u, showStatus status, active)
+        post "/status" $ do
+            t <- getTime
+            us <- param "users"
+            let users = filter filterUser us
+            results <- liftIO $ forM users $ \user -> do
+                (status, active) <- getStatusIO t user
+                return (user, showStatus status, active)
+            json results
     where
         getTime = rescue (do
             t <- param "time"
             return $ fromInteger t
             ) (\_ -> liftIO $ readIORef timeRef)
+        filterUser u = T.length u < maxUserLength
         getUser = do
             u <- param "user"
-            if T.length u < maxUserLength
+            if filterUser u
             then return u
             else next

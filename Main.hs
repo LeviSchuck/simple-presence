@@ -1,3 +1,4 @@
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Main entry point to the application.
@@ -18,12 +19,27 @@ import Data.IORef
 import Control.Concurrent
 import Data.Int
 import Control.Monad
+import qualified Data.Aeson as A
+import Data.Aeson((.=))
 
 timeRef :: IORef Int64
 timeRef = unsafePerformIO $ newIORef 0
 
 maxUserLength :: Int
 maxUserLength = 1024
+
+data TimeEvent = TEHeartBeat | TEActivity | TEDevice
+data FlagEvent = FBusy | FInvis
+
+data StatusResponse = StatusResponse UserID Status Timeline
+
+instance A.ToJSON StatusResponse where
+    toJSON (StatusResponse u s t) = A.object
+        [ "user"    .= u
+        , "status"  .= s
+        , "meta"    .= t
+        ]
+
 
 -- | The main entry point.
 main :: IO ()
@@ -34,41 +50,62 @@ main = do
         writeIORef timeRef t'
         threadDelay 1000000 -- Delay 1 second approx
     scotty 30400 $ do
-        get "/" $ text "Up and running."
-        get "/time" $ do
-            time <- getTime
-            json time
-        get "/heartbeat/:user" $ do
+        get "/" $ json ("Hi."::T.Text)
+        get "/time" $ getTime >>= json
+        get "/heartbeat/:site/:user" $ timeEvent TEHeartBeat
+        get "/activity/:site/:user" $ timeEvent TEActivity
+        get "/device/:site/:user" $ timeEvent TEActivity
+        post "/busy/:site/:user" $ flagEvent FBusy
+        post "/invis/:site/:user" $ flagEvent FInvis
+        get "/status/:site/:user" $ do
+            site <- getSite
             t <- getTime
-            u <- getUser
-            liftIO $ heartBeatIO t u
-            text "OK"
-        get "/activity/:user" $ do
-            t <- getTime
-            u <- getUser
-            liftIO $ activityIO t u
-            text "OK"
-        get "/status/:user" $ do
-            t <- getTime
-            u <- getUser
-            (status, active) <- liftIO $ getStatusIO t u
-            json $ (u, showStatus status, active)
-        post "/status" $ do
+            user <- getUser
+            (st, ti) <- liftIO $ getStatusIO t (site, user)
+            json $ StatusResponse user st ti
+        post "/:site/status" $ do
+            site <- getSite
             t <- getTime
             us <- jsonData
-            let users = filter filterUser us
+            let users = filter filterLen us
             results <- liftIO $ forM users $ \user -> do
-                (status, active) <- getStatusIO t user
-                return (user, showStatus status, active)
+                (st, ti) <- getStatusIO t (site, user)
+                return $ StatusResponse user st ti
             json results
     where
+        timeEvent e = do
+            s <- getSite
+            u <- getUser
+            t <- getTime
+            liftIO $ handleEventIO (s, u) $ case e of
+                TEHeartBeat -> HeartBeat t
+                TEActivity -> Activity t
+                TEDevice -> EDevice t
+            json True
+        flagEvent f = do
+            s <- getSite
+            u <- getUser
+            fv <- jsonData
+            liftIO $ handleEventIO (s, u) $ if fv
+                then case f of
+                    FBusy -> MarkBusy
+                    FInvis -> MarkInvisible
+                else case f of
+                    FBusy -> UnmarkBusy
+                    FInvis -> UnmarkInvisible
+            json True
         getTime = rescue (do
             t <- param "time"
             return $ fromInteger t
             ) (\_ -> liftIO $ readIORef timeRef)
-        filterUser u = T.length u < maxUserLength
+        filterLen u = let l =T.length u in l > 0 && l < maxUserLength
+        getSite = do
+            s <- param "site"
+            if filterLen s
+            then return s
+            else next
         getUser = do
             u <- param "user"
-            if filterUser u
+            if filterLen u
             then return u
             else next
